@@ -11,7 +11,7 @@
 
 
 ##「贰」扩展模块
-* [1.建模管理]()
+* [1.建模管理](extension/modeling/README.md)
     * [1.1.Attribute详解](extension/modeling/001-attribute.md)
 * [2.动态路由]()
 * [3.RBAC模型]()
