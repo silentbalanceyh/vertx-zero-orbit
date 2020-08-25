@@ -23,7 +23,6 @@
 | :--- | :--- | :--- |
 | source | 无 | 关联的底层 M_ENTITY 表的 identifier |
 | sourceField | 无 | 关联的底层 M_FIELD 表的 name 属性 |
-| sourceDepend | 无 | 引用属性/外联属性中，依赖字段信息，直接拷贝数据 |
 | sourceConfig | 无 | 标准属性专用配置，集合配置才会用到 |
 | sourceReference | 无 | 引用属性专用配置 |
 | sourceExternal | 无 | 外联属性专用配置 |
@@ -33,6 +32,7 @@
 | 配置名 | 默认值 | 含义 |
 | :--- | :--- | :--- |
 | isArray | false | 当前属性是否集合属性，集合属性会启用JsonArray序列化 |
+| isRefer | false | 当前属性是 type = REFERENCE 中的主属性 |
 | isLock | false | 是否锁定，如果锁定，该属性不可在建模管理中删除 |
 | isTrack | true | 是否监控，如果监控，则该属性会在启用历史记录时生成变更历史 |
 | isConfirm | true | 变更确认，如果启用变更确认，该属性会进入确认/更新的双阶段更新流程 |
@@ -104,10 +104,89 @@ type = INTERNAL, isArray = false
 type = INTERNAL, isArray = true
 ```
 
+&ensp;&ensp;&ensp;&ensp;标准的CRUD流程即执行了JtComponent的标准流程，该流程主要处理核心集合属性，这种场景中会启用下边的字段，属性表如下：
+
+| 配置名 | 含义 |
+| :--- | :--- |
+| source | 关联的底层 M_ENTITY 表的 identifier |
+| sourceField | 关联的底层 M_FIELD 表的 name 属性 |
+| sourceConfig | 标准集合属性的相关配置，该配置可以拷贝到 columns 中 |
+
+&ensp;&ensp;&ensp;&ensp;参考下图处理这种类型的集合属性配置信息，该场景需要结合特殊的通道统一完成：
+
+![](./_image/2020-08-24/2020-08-25-23-02-53.jpg)
+
+&ensp;&ensp;&ensp;&ensp;和单独属性不同的点在于：这种情况下，`UI_FIELD`表中存储了这个属性的表单控件配置信息，这个控件对应的配置在FormDesigner（表单设计器）上是从sourceConfig字段提供数据源头，而不是随意配置，所以**同步配置**主要解决的就是`sourceConfig`到`UI_FIELD`部分的配置流程。
+
 ### 3.4. 引用单记录
+
+>  引用记录的唯一一点必须是：只可以读取，不可以更新，系统不支持级联更新引用数据信息。
+
+```shell
+type = REFERENCE, isArray = false
+```
+
+&ensp;&ensp;&ensp;&ensp;标准的CRUD流程执行了**非写入**类的JtComponent的标准流程，该流程主要处理单属性和依赖属性的相关信息。
 
 #### 3.4.1. 主引用属性
 
+```shell
+isRefer = true
+```
+
+&ensp;&ensp;&ensp;&ensp;主引用属性配置了直接依赖的关联属性，通常是**主键**，该属性的相关配置如下：
+
+| 配置名 | 含义 |
+| :--- | :--- |
+| source | 关联的底层 M_ENTITY 表的 identifier |
+| sourceField | 关联的底层 M_FIELD 表的 name 属性 |
+
 #### 3.4.2. 辅助引用属性
 
+```shell
+isRefer = false
+```
+
+&ensp;&ensp;&ensp;&ensp;辅助引用属性依赖主引用属性，通常是**纯属性**，该属性的相关配置如下：
+
+| 配置名 | 含义 |
+| :--- | :--- |
+| source | 关联的底层 M_ENTITY 表的 identifier |
+| sourceField | 关联的底层 M_FIELD 表的 name 属性 |
+
+#### 3.4.3. 详细解析单记录引用
+
+&ensp;&ensp;&ensp;&ensp;引用记录仅适用于记录和记录之间的合并，也就是一对一模式（One To One），这种模式下，所有的配置都通过主配置和辅助引用配置二者完成，该场景的结构图如下：
+
+![](./_image/2020-08-24/2020-08-26-01-25-20.jpg)
+
+&ensp;&ensp;&ensp;&ensp;这种场景比较特殊，需要针对一些情况进行解释：
+
+1. isRefer = true表示引用触发字段主字段，仅针对source对应的identifier模型标识，此时sourceField则是查询条件，简单说：`SELECT * FROM <identifier> WHERE <sourceField> = value`。
+2. isRefer = false则标识关联字段，如name12, name13等，这两种字段不包含sourceReference的信息，为辅助引用字段，它们只有sourceField起作用，它们的sourceField则存在于`*`结果集中。
+3. 一个 Model 中可能包含多个isRefer = true的属性，但该属性的source必须不同。
+4. 分组时按source和isRefer进行，实现引用数据的一次性填充，每个source只从数据库中读取一次引用信息，不读取第二次。
+
 ### 3.5. 引用多记录
+
+>  引用记录的唯一一点必须是：只可以读取，不可以更新，系统不支持级联更新引用数据信息。
+
+```shell
+type = REFERENCE, isArray = true, isRefer = true
+```
+
+&ensp;&ensp;&ensp;&ensp;标准的CRUD流程执行了**非写入**类的JtComponent的标准流程，该流程主要处理集合属性的相关信息，这种情况下，不考虑额外的属性，也不可能有额外属性，所以当前字段就必须是主属性，被引用字段必须不是唯一字段，导致的最终结果是一个数组，如果是唯一字段，则此种引用不合法，这种情况只针对一对多（One To Many）。属性表如下：
+
+| 配置名 | 含义 |
+| :--- | :--- |
+| source | 关联的底层 M_ENTITY 表的 identifier |
+| sourceField | 关联的底层 M_FIELD 表的 name 属性 |
+| sourceReference | 引用集合中的标准配置 |
+
+整体的引用结构图如下：
+
+![](./_image/2020-08-24/2020-08-26-01-29-06.jpg)
+
+>  这种情况只能是单字段，所以最终数据格式必须是JsonArray，而不能是其他格式。
+
+### 3.6. 外联属性（保留）
