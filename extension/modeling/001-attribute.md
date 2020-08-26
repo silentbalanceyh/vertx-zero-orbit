@@ -13,6 +13,8 @@
 | EXTERNAL | false | **保留**：外联属性中的单属性 |
 | EXTERNAL | true | **保留**：外联属性中的集合属性 |
 
+> EXTERNAL类型的属性表示模型中属性的数据源来自于非Ox的业务数据库，后期开通集成直接调用接口时采用该属性完成外置属性的关联任务。
+
 ## 2. 配置数据
 
 &ensp;&ensp;&ensp;&ensp;除开上述的`type`和`isArray`之外，属性定义中的核心配置数据如下。
@@ -23,9 +25,9 @@
 | :--- | :--- | :--- |
 | source | 无 | 关联的底层 M_ENTITY 表的 identifier |
 | sourceField | 无 | 关联的底层 M_FIELD 表的 name 属性 |
-| sourceConfig | 无 | 标准属性专用配置，集合配置才会用到 |
-| sourceReference | 无 | 引用属性专用配置 |
-| sourceExternal | 无 | 外联属性专用配置 |
+| sourceConfig | 无 | type = INTERNAL, 标准属性专用配置，集合配置才会用到 |
+| sourceReference | 无 | type = REFERENCE, 引用属性专用配置 |
+| sourceExternal | 无 | type = EXTERNAL, 外联属性专用配置 |
 
 ### 2.2. 标记相关
 
@@ -52,7 +54,7 @@
 
 &ensp;&ensp;&ensp;&ensp;属性的适配场景分为如下：
 
-* 基本的CRUD以及目前提供的标准化14接口操作。
+* 基本的CRUD以及目前提供的标准化接口（14个）操作。
 * 导入/导出的分流处理，单属性和集合属性需要执行不同的文件模板流程。
 * 变更历史，属性是否记录变更历史，使用`isTrack`判断。
 * 变更确认，属性是否开启二阶段更新，使用`isConfirm`判断。
@@ -96,7 +98,9 @@ type = INTERNAL, isArray = false
 | attr1 | id1 | name12 |
 | attr2 | id2 | name21 |
 
-> 如果只关联到一个Entity实体，则 source 字段的值在同一个模型中是唯一的。
+&ensp;&ensp;&ensp;&ensp;从图上可以知道，该模型的类型必须是`JOINED`（它的属性来自于两个不同的实体），而属性`attr1`来自于实体`id1`中，属性`attr2`来自于实体`id2`中，模型本身在定义层实现了跨表处理（底层实体一个实体对应一个实体表）。
+
+> 如果只关联到一个Entity实体，则 source 字段的值在同一个模型中是唯一的，但系统本身不对这部分执行检查和控制，由数据本身来界定。
 
 ### 3.3. 标准集合属性
 
@@ -116,17 +120,20 @@ type = INTERNAL, isArray = true
 
 ![](./_image/2020-08-24/2020-08-25-23-02-53.jpg)
 
-&ensp;&ensp;&ensp;&ensp;和单独属性不同的点在于：这种情况下，`UI_FIELD`表中存储了这个属性的表单控件配置信息，这个控件对应的配置在FormDesigner（表单设计器）上是从sourceConfig字段提供数据源头，而不是随意配置，所以**同步配置**主要解决的就是`sourceConfig`到`UI_FIELD`部分的配置流程。
+&ensp;&ensp;&ensp;&ensp;和单独属性不同的点在于：这种情况下，`UI_FIELD`表中存储了这个属性的表单控件配置信息，这个控件对应的配置在FormDesigner（表单设计器）上是从sourceConfig字段提供数据源头，而不是随意配置，所以**同步配置**主要解决的就是`sourceConfig`到`UI_FIELD`部分的配置流程。这种类型的字段在表单呈现时通常是表格或表格编辑器，因此，它的表格列必须是`sourceConfig`中定义的属性子集，不可以越过该子集而存在，当前版本主要是**兼容性**版本，所以`UI_FIELD`的配置可以独立存在，但一旦启用FormDesigner来实现表单的字段定制，该字段中的属性信息必须统一到`sourceConfig`中来完成。
 
 ### 3.4. 引用单记录
 
->  引用记录的唯一一点必须是：只可以读取，不可以更新，系统不支持级联更新引用数据信息。
+>  引用记录只可以读取，不可以更新，系统不支持级联更新引用数据信息。
 
 ```shell
 type = REFERENCE, isArray = false
 ```
 
-&ensp;&ensp;&ensp;&ensp;标准的CRUD流程执行了**非写入**类的JtComponent的标准流程，该流程主要处理单属性和依赖属性的相关信息。
+&ensp;&ensp;&ensp;&ensp;标准的CRUD流程执行了**非写入**类的JtComponent的标准流程，该流程主要处理单属性和依赖属性的相关信息，引用单记录的执行流程包含两种属性：
+
+* 主引用属性：和其他模型的引用关系依赖该属性执行计算。
+* 辅助引用属性：和其他模型的引用关系从主引用属性的计算结果中直接解析，属性本身不计算。
 
 #### 3.4.1. 主引用属性
 
@@ -134,7 +141,7 @@ type = REFERENCE, isArray = false
 isRefer = true
 ```
 
-&ensp;&ensp;&ensp;&ensp;主引用属性配置了直接依赖的关联属性，通常是**主键**，该属性的相关配置如下：
+&ensp;&ensp;&ensp;&ensp;主引用属性配置了直接依赖的关联属性，通常是**主键**或者**唯一键**，该属性的相关配置如下：
 
 | 配置名 | 含义 |
 | :--- | :--- |
@@ -156,37 +163,47 @@ isRefer = false
 
 #### 3.4.3. 详细解析单记录引用
 
-&ensp;&ensp;&ensp;&ensp;引用记录仅适用于记录和记录之间的合并，也就是一对一模式（One To One），这种模式下，所有的配置都通过主配置和辅助引用配置二者完成，该场景的结构图如下：
+&ensp;&ensp;&ensp;&ensp;引用记录仅适用于记录和记录之间的关联合并，也就是一对一模式（One To One），这种模式下，所有的配置都通过主配置和辅助引用配置二者完成，该场景的结构图如下：
 
 ![](./_image/2020-08-24/2020-08-26-01-25-20.jpg)
 
 &ensp;&ensp;&ensp;&ensp;这种场景比较特殊，需要针对一些情况进行解释：
 
-1. isRefer = true表示引用触发字段主字段，仅针对source对应的identifier模型标识，此时sourceField则是查询条件，简单说：`SELECT * FROM <identifier> WHERE <sourceField> = value`。
-2. isRefer = false则标识关联字段，如name12, name13等，这两种字段不包含sourceReference的信息，为辅助引用字段，它们只有sourceField起作用，它们的sourceField则存在于`*`结果集中。
-3. 一个 Model 中可能包含多个isRefer = true的属性，但该属性的source必须不同。
-4. 分组时按source和isRefer进行，实现引用数据的一次性填充，每个source只从数据库中读取一次引用信息，不读取第二次。
+1. isRefer = true表示引用触发字段主属性，仅针对source对应的identifier模型标识，此时sourceField则是查询条件，简单说：`SELECT * FROM <identifier> WHERE <sourceField> = value`。
+2. isRefer = false则标识关联字段（辅助属性），如name12, name13等，这两种字段不包含sourceReference的信息，为辅助引用字段，它们只有sourceField起作用，它们的sourceField则存在于`*`结果集中（针对同一个模型而言，主属性只能有一个，而辅助属性可以有多个，目前版本不支持多字段同时引用模型的情况，不纳入引用计算。）。
+3. 一个Model中可能包含多个isRefer = true的属性，但该属性的source必须不同，分组时按source和isRefer进行，实现引用数据的一次性填充，每个source只从数据库中读取一次引用信息，不读取第二次。
+
+&ensp;&ensp;&ensp;&ensp;isRefer的存在意义主要在于针对引用模型相关信息只计算一次，不执行二次计算，参考上图，如果`attr1`，`attr2`，`attr3`都来自于同一个**引用实体**，那么在计算这三个属性的值时，只根据`attr1`计算一次，然后将计算结果拷贝到`attr2`和`attr3`中，不再针对同一个引用实体进行二次计算。
 
 ### 3.5. 引用多记录
 
->  引用记录的唯一一点必须是：只可以读取，不可以更新，系统不支持级联更新引用数据信息。
+>  引用记录只可以读取，不可以更新，且多记录的最终数据结构必须是JsonArray，即JSON数组结构。
 
 ```shell
 type = REFERENCE, isArray = true, isRefer = true
 ```
 
-&ensp;&ensp;&ensp;&ensp;标准的CRUD流程执行了**非写入**类的JtComponent的标准流程，该流程主要处理集合属性的相关信息，这种情况下，不考虑额外的属性，也不可能有额外属性，所以当前字段就必须是主属性，被引用字段必须不是唯一字段，导致的最终结果是一个数组，如果是唯一字段，则此种引用不合法，这种情况只针对一对多（One To Many）。属性表如下：
+&ensp;&ensp;&ensp;&ensp;标准的CRUD流程执行了**非写入**类的JtComponent的标准流程，该流程主要处理集合属性的相关信息，这种情况下，不考虑额外的属性，也不可能有额外属性，所以当前字段就必须是主属性，被引用字段**不能是**主键和唯一键，导致的最终结果是一个数组，如果是唯一字段，则此种引用不合法，这种情况只针对一对多（One To Many）。属性表如下：
 
 | 配置名 | 含义 |
 | :--- | :--- |
 | source | 关联的底层 M_ENTITY 表的 identifier |
 | sourceField | 关联的底层 M_FIELD 表的 name 属性 |
-| sourceReference | 引用集合中的标准配置 |
+| sourceReference | 引用集合中的标准配置，定义了当前引用数据的计算法则 |
 
 整体的引用结构图如下：
 
 ![](./_image/2020-08-24/2020-08-26-01-29-06.jpg)
 
->  这种情况只能是单字段，所以最终数据格式必须是JsonArray，而不能是其他格式。
-
 ### 3.6. 外联属性（保留）
+
+&ensp;&ensp;&ensp;&ensp;当前版本暂时不考虑外联属性的引入，但是作为保留，外联属性是合法的，外联属性的核心定义如下：
+
+* 数据源必须来自第三方，不能是当前Ox中的业务数据库。
+* 第三方也包括No-SQL数据库，如Mongo或HBase等。
+* 必须配置`sourceExternal`，该字段用于定义这种类型的数据源的核心取数据的规则。
+* 和引用类型一样，此种属性不可以被更新。
+
+## 4. 小结
+
+（略）
